@@ -1,3 +1,4 @@
+<details><summary>原项目介绍</summary>
 <div style="
   display: flex;
   justify-content: center;
@@ -35,9 +36,7 @@
 ## Introduction
 
 Ming-omni-tts is a high-performance unified audio generation model that achieves precise control over speech attributes and enables single-channel synthesis of speech, environmental sounds, and music. Powered by a custom 12.5Hz continuous tokenizer and Patch-by-Patch compression, it delivers competitive inference efficiency (3.1Hz). Additionally, the model features robust text normalization capabilities for the accurate and natural narration of complex mathematical and chemical expressions.  
-  
-yscgreedy<20260303>:
-- 使用fastapi为本模型添加了一个可用的后端，app在service目录下，cookbooks/test.py中的MingAudio类提取到了ming_audio.py中，供后端调用。开放的接口为/healthz, /v1/generate, /v1/stream, /seed，具体调用方式见test.ipynb。
+
 
 <strong>🚀 Core Capabilities</strong>
 
@@ -1132,13 +1131,53 @@ cd Ming-omni-tts
 python3 cookbooks/test.py
 ```
 
+
+
+Environment variables:
+- `MODEL_PATH` (default: `inclusionAI/Ming-omni-tts-0.5B`)
+- `DEVICE` (default: `cuda:0`)
+
+For detailed usage, please refer to [demo.ipynb](cookbooks/cookbook.ipynb).
+
+Note: We test the examples on hardware of NVIDIA H800-80GB/H20-96G with CUDA 12.4.
+
+
+## Citation
+
+If you find our work helpful, feel free to give us a cite.
+<!-- ```
+@misc{yan2025minguniaudiospeechllmjoint,
+      title={Ming-omni-tts: Speech LLM for Joint Understanding, Generation and Editing with Unified Representation}, 
+      author={Canxiang Yan and Chunxiang Jin and Dawei Huang and Haibing Yu and Han Peng and Hui Zhan and Jie Gao and Jing Peng and Jingdong Chen and Jun Zhou and Kaimeng Ren and Ming Yang and Mingxue Yang and Qiang Xu and Qin Zhao and Ruijie Xiong and Shaoxiong Lin and Xuezhi Wang and Yi Yuan and Yifei Wu and Yongjie Lyu and Zhengyu He and Zhihao Qiu and Zhiqiang Fang and Ziyuan Huang},
+      year={2025},
+      eprint={2511.05516},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2511.05516}, 
+}
+``` -->
+</details>
+
+## 有关本项目  
+本项目fork自InclusionAI的Ming-omni-tts，并利用其模型功能做了一些工作：
+yscgreedy<20260303>:
+  - 使用fastapi为本模型添加了一个可用的后端，app.py在service目录下，cookbooks/test.py中的MingAudio类提取到了ming_audio.py中，供后端调用。开放的接口为/healthz, /v1/generate, /v1/stream, /seed，具体调用方式见test.ipynb。
+  - 原有的Ming-omni-tts模型底层支持流式输出，但MingAudio并没有提供对应方法，因此迁移时添加了对应方法并在fastapi中暴露了接口。
+      - 简单的rtf测试(位于test.ipynb)，在Windows11/RTX 4060 Laptop GPU上，流式输出的rtf约为0.8。
+
 ### Backend Service (FastAPI, Single Endpoint)
 ```bash
+git clone https://github.com/Yscgreedy/Ming-omni-tts.git
 pip install -r requirements.txt
 uvicorn service.app:app --host 0.0.0.0 --port 8000
+# or
+python ./service/app.py
 ```
 
 Unified endpoint:
+- `GET /healthz`
+- `POST /seed`
+- `POST /v1/stream`
 - `POST /v1/generate`
 
 Text generation request:
@@ -1186,27 +1225,3 @@ curl -X POST http://127.0.0.1:8000/v1/generate \
     "prompt_wav_path": "data/wavs/00000309-00000300.wav"
   }'
 ```
-
-Environment variables:
-- `MODEL_PATH` (default: `inclusionAI/Ming-omni-tts-0.5B`)
-- `DEVICE` (default: `cuda:0`)
-
-For detailed usage, please refer to [demo.ipynb](cookbooks/cookbook.ipynb).
-
-Note: We test the examples on hardware of NVIDIA H800-80GB/H20-96G with CUDA 12.4.
-
-
-## Citation
-
-If you find our work helpful, feel free to give us a cite.
-<!-- ```
-@misc{yan2025minguniaudiospeechllmjoint,
-      title={Ming-omni-tts: Speech LLM for Joint Understanding, Generation and Editing with Unified Representation}, 
-      author={Canxiang Yan and Chunxiang Jin and Dawei Huang and Haibing Yu and Han Peng and Hui Zhan and Jie Gao and Jing Peng and Jingdong Chen and Jun Zhou and Kaimeng Ren and Ming Yang and Mingxue Yang and Qiang Xu and Qin Zhao and Ruijie Xiong and Shaoxiong Lin and Xuezhi Wang and Yi Yuan and Yifei Wu and Yongjie Lyu and Zhengyu He and Zhihao Qiu and Zhiqiang Fang and Ziyuan Huang},
-      year={2025},
-      eprint={2511.05516},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2511.05516}, 
-}
-``` -->
