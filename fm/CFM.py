@@ -10,27 +10,33 @@ class Solver:
         self.sigma = sigma
         self.temperature = temperature
 
-    def integrate(self, t):
-        solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
-        solution[0] = self.y0
+    def integrate(self, t, return_trajectory=False):
+        if return_trajectory:
+            solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
+            solution[0] = self.y0
 
         j = 1
         y0 = self.y0
+        y_final = y0
         for t0, t1 in zip(t[:-1], t[1:]):
             dt = t1 - t0
             f0 = self.func(t0, y0)
             dy = dt * f0
             y1 = y0 + dy
+            y_final = y1  # clean value before noise (matches original trajectory[-1])
 
-            while j < len(t) and t1 >= t[j]:
-                solution[j] = self._linear_interp(t0, t1, y0, y1, t[j])
-                j += 1
+            if return_trajectory:
+                while j < len(t) and t1 >= t[j]:
+                    solution[j] = self._linear_interp(t0, t1, y0, y1, t[j])
+                    j += 1
 
             noise = torch.randn_like(y0) 
             shift = self.sigma * (self.temperature ** 0.5) * (abs(dt) ** 0.5) * noise
             y0 = y1 + shift
 
-        return solution
+        if return_trajectory:
+            return solution
+        return y_final
 
     def _linear_interp(self, t0, t1, y0, y1, t):
         if t == t0:
@@ -141,8 +147,6 @@ class CFM(nn.Module):
             t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 
         solver = Solver(fn, y0, sigma=sigma, temperature=temperature)
-        trajectory = solver.integrate(t)
-        sampled = trajectory[-1]
-        out = sampled
+        out = solver.integrate(t, return_trajectory=False)
 
-        return out, trajectory
+        return out

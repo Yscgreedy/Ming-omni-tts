@@ -4,7 +4,6 @@
 
 import torch
 import torch.nn as nn
-from tqdm import tqdm
 from transformers import PreTrainedModel, Qwen2ForCausalLM, Qwen2Config
 from loguru import logger
 from configuration_bailingmm import BailingMMConfig
@@ -60,6 +59,20 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             llm_cond_dim=self.model.config.hidden_size,
             **self.config.ditar_config
         )
+        # torch.compile the DiT for speedup on the repeated fixed-shape
+        # forward calls (~20 DiT forwards per AR step).
+        # Opt-in via TORCH_COMPILE_DIT=1  (default OFF – Triton / CUDA Graphs
+        # can be unreliable on Windows or older drivers).
+        import os as _os
+        if _os.environ.get("TORCH_COMPILE_DIT", "0") == "1":
+            _mode = _os.environ.get("TORCH_COMPILE_MODE", "reduce-overhead")
+            try:
+                self.flowloss.cfm.model = torch.compile(
+                    self.flowloss.cfm.model, mode=_mode
+                )
+                logger.info(f"DiT model compiled with mode='{_mode}'")
+            except Exception as e:
+                logger.warning(f"torch.compile failed, falling back to eager mode: {e}")
         self.stop_head = nn.Linear(self.model.config.hidden_size, 2, bias=True)
         self.spk_head = nn.Linear(192, self.model.config.hidden_size, bias=True)
         self.post_init()
@@ -347,7 +360,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             text=text,
         )
         input_ids, inputs_embeds = input_ids[:,:-1], inputs_embeds[:,:-1,...]
-        logger.info(self.tokenizer.decode(input_ids[0].cpu().numpy().tolist()).__repr__())
+        if logger._core.min_level <= 20:  # only when DEBUG/TRACE enabled
+            logger.debug(self.tokenizer.decode(input_ids[0].cpu().numpy().tolist()).__repr__())
         attention_mask = torch.ones(input_ids.shape).to(input_ids.device)
         position_ids = (attention_mask.cumsum(-1) - 1).masked_fill_((attention_mask == 0), 1)
         self.rope_deltas = None
@@ -417,8 +431,10 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
 
         past_key_values = None
         result = []
+        # Pre-allocate the single-token attention mask used in every step after the first
+        _step_attn_mask = torch.ones(1, 1, device=input_ids.device)
         # Each inference step combines Autoregressive (AR) decoding with Flow Matching
-        for step in tqdm(range(max_decode_steps)):
+        for step in range(max_decode_steps):
             with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
                 outputs = self.model(
                     attention_mask=attention_mask,
@@ -431,51 +447,51 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
                     use_cache=True,
                     past_key_values=past_key_values
                 )
-            past_key_values = outputs.past_key_values
-            z_diff = outputs.hidden_states[-1][:, -1:, :]
+                past_key_values = outputs.past_key_values
+                z_diff = outputs.hidden_states[-1][:, -1:, :]
 
-            # Initialize the latent_history for the first step
-            if step == 0:
-                latent_history = torch.zeros(1, self.history_patch_size, self.latent_dim).to(z_diff.device)
-                if prompt_latent is not None:
-                    start_index = self.history_patch_size - prompt_latent.size(1)
-                    if start_index < 0:
-                        latent_history[:] = prompt_latent[:, -start_index:,:]
-                    else:
-                        latent_history[:, start_index:,:] = prompt_latent
+                # Initialize the latent_history for the first step
+                if step == 0:
+                    latent_history = torch.zeros(1, self.history_patch_size, self.latent_dim).to(z_diff.device)
+                    if prompt_latent is not None:
+                        start_index = self.history_patch_size - prompt_latent.size(1)
+                        if start_index < 0:
+                            latent_history[:] = prompt_latent[:, -start_index:,:]
+                        else:
+                            latent_history[:, start_index:,:] = prompt_latent
                     
-            # Predict the latent for the current timestep using the Flow Matching head, conditioned on the history and other inputs.
-            sampled_token_latent, trajectory = self.flowloss.sample(z_diff, latent_history, cfg, self.patch_size, sigma=sigma, temperature=temperature)
-            result.append(sampled_token_latent)
+                # Predict the latent for the current timestep using the Flow Matching head, conditioned on the history and other inputs.
+                sampled_token_latent = self.flowloss.sample(z_diff, latent_history, cfg, self.patch_size, sigma=sigma, temperature=temperature)
+                result.append(sampled_token_latent)
 
-            # Check if the generation is complete.
-            if self.stop_head(z_diff)[0][0].softmax(dim=-1)[1] > 0.5 and step > 3:
-                yield sampled_token_latent, True
-                break
-            else:
-                yield sampled_token_latent, False
-
-            inputs_embeds = self.linear_proj_audio(sampled_token_latent)
-
-            # Update position_ids, attention_mask, latent_history for next step
-            if self.model_type == 'dense':
-                position_ids = position_ids[:, -1:] + 1
-            else:
-                batch_size, seq_length, _ = inputs_embeds.shape
-                if past_key_values and self.rope_deltas:
-                    delta = past_key_values[0][1].shape[2] + self.rope_deltas
-                elif past_key_values:
-                    delta = torch.tensor(past_key_values[0][1].shape[2]).to(inputs_embeds.device)
+                # Check if the generation is complete.
+                if self.stop_head(z_diff)[0][0].softmax(dim=-1)[1] > 0.5 and step > 3:
+                    yield sampled_token_latent, True
+                    break
                 else:
-                    delta = torch.tensor(0).to(inputs_embeds.device)
-                position_ids = torch.arange(seq_length, device=inputs_embeds.device)
-                position_ids = position_ids.view(1, -1).expand(batch_size, -1)
-                position_ids = position_ids.add(delta)
-                position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+                    yield sampled_token_latent, False
 
-            attention_mask = torch.ones(inputs_embeds.shape[0], 1).to(inputs_embeds.device)
-            latent_history[:, :-self.patch_size, :] = latent_history[:, self.patch_size:, :].clone()
-            latent_history[:, -self.patch_size:, :] = sampled_token_latent[:]
+                inputs_embeds = self.linear_proj_audio(sampled_token_latent)
+
+                # Update position_ids, attention_mask, latent_history for next step
+                if self.model_type == 'dense':
+                    position_ids = position_ids[:, -1:] + 1
+                else:
+                    batch_size, seq_length, _ = inputs_embeds.shape
+                    if past_key_values and self.rope_deltas:
+                        delta = past_key_values[0][1].shape[2] + self.rope_deltas
+                    elif past_key_values:
+                        delta = torch.tensor(past_key_values[0][1].shape[2]).to(inputs_embeds.device)
+                    else:
+                        delta = torch.tensor(0).to(inputs_embeds.device)
+                    position_ids = torch.arange(seq_length, device=inputs_embeds.device)
+                    position_ids = position_ids.view(1, -1).expand(batch_size, -1)
+                    position_ids = position_ids.add(delta)
+                    position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+
+                attention_mask = _step_attn_mask
+                latent_history = torch.roll(latent_history, -self.patch_size, dims=1)
+                latent_history[:, -self.patch_size:, :] = sampled_token_latent
 
     @torch.inference_mode()
     def generate(

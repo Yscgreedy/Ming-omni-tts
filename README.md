@@ -7,13 +7,13 @@
 ">
 <img src="./figures/ant-bailing.png" width="60" alt="Ming-omni-tts Logo" />
   <h1 style="margin: 0;">
-        Ming-omni-tts: Simple and Efficient Unified Generation of Speech, Music, and Sound with Precise Control
+        Ming-omni-tts: A Simple and Efficient Unified Generation of Speech, Music, and Sound with Precise Control
   </h1>
   
 </div>
 
 
-<p align="center">🌐<a href="https://xqacmer.github.io/Ming-omni-tts/">Project Page</a> ｜🤗 <a href="https://huggingface.co/inclusionAI/Ming-omni-tts-0.5B">Hugging Face</a>｜ 🤖 <a href="https://modelscope.cn/models/inclusionAI/Ming-omni-tts-0.5B">ModelScope</a> | 🎮 <a href="https://modelscope.cn/studios/antsipan/ming-uniaudio-demo">Gradio Demo-zh</a> | 🎮 <a href="https://huggingface.co/spaces/cafe3310/ming-uniaudio-demo-en">Gradio Demo-en</a> | 💬 <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,O7MiZqrOrB2c7PnUZVBNvmDh/6tghNLMEtXqMteyRIpuRVJIwrSsXmL8oFqU5ajJ&_dt_no_comment=1&origin=11? ">DingTalk(钉钉)</a>
+<p align="center">🌐<a href="https://xqacmer.github.io/Ming-Flash-Omni-V2-TTS/">Project Page</a> ｜🤗 <a href="https://huggingface.co/inclusionAI/Ming-omni-tts-0.5B">Hugging Face</a>｜ 🤖 <a href="https://modelscope.cn/models/inclusionAI/Ming-omni-tts-0.5B">ModelScope</a> | 🎮 <a href="https://modelscope.cn/studios/antsipan/ming-uniaudio-demo">Gradio Demo</a>
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -34,7 +34,10 @@
 
 ## Introduction
 
-Ming-omni-tts is a high-performance unified audio generation model that achieves precise control over speech attributes and enables single-channel synthesis of speech, environmental sounds, and music. Powered by a custom 12.5Hz continuous tokenizer and Patch-by-Patch compression, it delivers competitive inference efficiency (3.1Hz). Additionally, the model features robust text normalization capabilities for the accurate and natural narration of complex mathematical and chemical expressions.
+Ming-omni-tts is a high-performance unified audio generation model that achieves precise control over speech attributes and enables single-channel synthesis of speech, environmental sounds, and music. Powered by a custom 12.5Hz continuous tokenizer and Patch-by-Patch compression, it delivers competitive inference efficiency (3.1Hz). Additionally, the model features robust text normalization capabilities for the accurate and natural narration of complex mathematical and chemical expressions.  
+  
+yscgreedy<20260303>:
+- 使用fastapi为本模型添加了一个可用的后端，app在service目录下，cookbooks/test.py中的MingAudio类提取到了ming_audio.py中，供后端调用。开放的接口为/healthz, /v1/generate, /v1/stream, /seed，具体调用方式见test.ipynb。
 
 <strong>🚀 Core Capabilities</strong>
 
@@ -969,6 +972,13 @@ Below is a comparison between Ming-omni-tts and other state-of-the-art (SOTA) mo
       <td style="text-align: center; padding: 8px; border: none;">0.523</td>
     </tr>
     <tr>
+      <td style="text-align: center; padding: 8px; border: none;"><strong><u>Ming-omni-tta-0.5B(ours)</u></strong></td>
+      <td style="text-align: center; padding: 8px; border: none;">Ant Group</td>
+      <td style="text-align: center; padding: 8px; border: none;"><strong><u>53.384</u></strong></td>
+      <td style="text-align: center; padding: 8px; border: none;">1.172</td>
+      <td style="text-align: center; padding: 8px; border: none;">0.504</td>
+    </tr>
+    <tr>
       <td style="text-align: center; padding: 8px; border: none;"><strong><u>Ming-omni-tts-0.5B(ours)</u></strong></td>
       <td style="text-align: center; padding: 8px; border: none;">Ant Group</td>
       <td style="text-align: center; padding: 8px; border: none;">74.292</td>
@@ -1056,6 +1066,13 @@ You can download our latest model and Benchmark from both Huggingface and ModelS
           <a href="https://modelscope.cn/models/inclusionAI/Ming-omni-tts-16.8B-A3B">🤖 ModelScope</a>
         </td>
       </tr>
+      <tr>
+        <td style="padding: 8px; text-align: center;">Ming-omni-tta-0.5B</td>
+        <td style="padding: 8px; text-align: center;">
+          <a href="https://huggingface.co/inclusionAI/Ming-omni-tta-0.5B">🤗 HuggingFace</a><br>
+          <a href="https://modelscope.cn/models/inclusionAI/Ming-omni-tta-0.5B">🤖 ModelScope</a>
+        </td>
+      </tr>
     </tbody>
   </table>
   <table style="width: 100%; max-width: 600px; margin: 16px 0;">
@@ -1101,12 +1118,78 @@ docker run -it --gpus all Ming-omni-tts:v1.1 /bin/bash
 
 
 ## Example Usage
+### Audio Reconstruction
+```bash
+git clone https://github.com/inclusionAI/MingTok-Audio.git
+cd MingTok-Audio
+python3 test.py
+```
 
+### Audio Generation
 ```bash
 git clone https://github.com/inclusionAI/Ming-omni-tts.git
 cd Ming-omni-tts
 python3 cookbooks/test.py
 ```
+
+### Backend Service (FastAPI, Single Endpoint)
+```bash
+pip install -r requirements.txt
+uvicorn service.app:app --host 0.0.0.0 --port 8000
+```
+
+Unified endpoint:
+- `POST /v1/generate`
+
+Text generation request:
+```bash
+curl -X POST http://127.0.0.1:8000/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_type": "text",
+    "prompt": "Please generate speech based on the following description.\n",
+    "text": "化学反应方程式：\\ce{2H2 + O2 -> 2H2O}",
+    "max_decode_steps": 200
+  }'
+```
+
+Speech generation (stream wav):
+```bash
+curl -X POST http://127.0.0.1:8000/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_type": "speech",
+    "response_mode": "stream",
+    "prompt": "Please generate speech based on the following description.\n",
+    "text": "我们的愿景是构建未来服务业的数字化基础设施，为世界带来更多微小而美好的改变。",
+    "use_spk_emb": true,
+    "prompt_wav_path": "data/wavs/10002287-00000094.wav",
+    "prompt_text": "在此奉劝大家别乱打美白针。",
+    "max_decode_steps": 200,
+    "cfg": 2.0,
+    "sigma": 0.25,
+    "temperature": 0.0
+  }' --output output/generated.wav
+```
+
+Speech generation (save path and return metadata):
+```bash
+curl -X POST http://127.0.0.1:8000/v1/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_type": "speech",
+    "response_mode": "path",
+    "output_wav_path": "output/service/demo.wav",
+    "prompt": "Please generate speech based on the following description.\n",
+    "text": "此次业绩下滑原因，可归结为企业停止服务某些品牌，而带来的负面影响。",
+    "use_spk_emb": true,
+    "prompt_wav_path": "data/wavs/00000309-00000300.wav"
+  }'
+```
+
+Environment variables:
+- `MODEL_PATH` (default: `inclusionAI/Ming-omni-tts-0.5B`)
+- `DEVICE` (default: `cuda:0`)
 
 For detailed usage, please refer to [demo.ipynb](cookbooks/cookbook.ipynb).
 

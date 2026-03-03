@@ -19,6 +19,6 @@ class FlowLoss(nn.Module):
 
     def sample(self, z, latent_history, cfg=1.0, patch_size=1, sigma=0.25, temperature=0,):
         # diffusion loss sampling
-        noise = torch.randn(z.shape[0], self.z_channels, patch_size, device=z.device)
-        sampled_token_latent = self.cfm.sample(noise=noise, c=z, latent_history=latent_history, cfg_scale=cfg, patch_size=patch_size, sigma=sigma, temperature=temperature)
-        return sampled_token_latent
+        noise = torch.randn(z.shape[0], self.z_channels, patch_size, device=z.device, dtype=z.dtype)
+        out = self.cfm.sample(noise=noise, c=z, latent_history=latent_history, cfg_scale=cfg, patch_size=patch_size, sigma=sigma, temperature=temperature)
+        return out

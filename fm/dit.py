@@ -96,7 +96,7 @@ class DiT(nn.Module):
         rope = self.rotary_embed.forward_from_seq_len(x.shape[1])
         
         if mask is not None:
-            mask_pad = mask.clone().detach()[:, :1].expand(-1, x_history.shape[1] + c.shape[1])
+            mask_pad = mask[:, :1].expand(-1, x_history.shape[1] + c.shape[1])
             mask = torch.cat([mask_pad, mask], dim=-1)
         for block in self.blocks:
             x = block(x, mask, rope)
@@ -107,8 +107,10 @@ class DiT(nn.Module):
         if not cfg_scale == 1:
             x = torch.cat([x, x], dim=0)
             latent_history = torch.cat([latent_history, latent_history], dim=0)
-            fake_latent = torch.zeros(c.shape).to(c.device)
-            c = torch.cat([c, fake_latent], dim=0)
+            # Reuse a cached zero-tensor instead of allocating every call
+            if not hasattr(self, '_null_cond') or self._null_cond.shape != c.shape:
+                self._null_cond = torch.zeros_like(c)
+            c = torch.cat([c, self._null_cond], dim=0)
         if t.ndim == 0:
             t = t.repeat(x.shape[0])
         model_out = self.forward(x, t, c, latent_history)
@@ -151,7 +153,7 @@ class Aggregator(nn.Module):
 
         rope = self.rotary_embed.forward_from_seq_len(x.shape[1])
         if mask is not None:
-            mask_pad = mask.clone().detach()[:, :1]
+            mask_pad = mask[:, :1]
             mask = torch.cat([mask_pad, mask], dim=-1)
         for block in self.blocks:
             x = block(x, mask, rope)
