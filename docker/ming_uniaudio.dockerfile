@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
@@ -27,9 +27,9 @@ RUN pip install --no-cache-dir --upgrade pip
 RUN pip config set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/
 
 RUN pip install --no-cache-dir \
-    torch==2.6.0 \
-    torchaudio==2.6.0 \
-    torchvision==0.21.0
+    torch==2.8.0 \
+    torchaudio==2.8.0 \
+    torchvision==0.23.0
 
 
 ENV FORCE_CUDA="1"
@@ -54,8 +54,9 @@ RUN pip install --no-cache-dir --no-build-isolation \
     x_transformers \
     torchdiffeq \
     torchtune \
-    torchao \
-    accelerate==1.3.0
+    torchao==0.13.0 \
+    accelerate==1.3.0 \
+    fastapi
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.7.0.post1+cu12torch2.5cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
 ARG FLASH_ATTN_URL=https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.0.post1/${FLASH_ATTN_WHEEL}
