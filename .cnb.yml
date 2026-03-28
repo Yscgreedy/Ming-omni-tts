@@ -1,0 +1,10 @@
+main:
+  vscode:
+    - docker:
+        build: image/Dockerfile
+      runner:
+        cpus: 8
+        tags: cnb:arch:amd64:gpu
+      services:
+        - vscode
+        - docker
