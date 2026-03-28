@@ -1159,7 +1159,7 @@ If you find our work helpful, feel free to give us a cite.
 </details>
 
 ## 有关本项目  
-本项目fork自InclusionAI的Ming-omni-tts，并利用其模型功能做了一些工作：
+本项目fork自InclusionAI的Ming-omni-tts，并利用其模型功能做了一些工作：  
 yscgreedy<20260303>:
   - 使用fastapi为本模型添加了一个可用的后端，app.py在service目录下，cookbooks/test.py中的MingAudio类提取到了ming_audio.py中，供后端调用。开放的接口为/healthz, /v1/generate, /v1/stream, /seed，具体调用方式见test.ipynb。
   - 原有的Ming-omni-tts模型底层支持流式输出，但MingAudio并没有提供对应方法，因此迁移时添加了对应方法并在fastapi中暴露了接口。
