@@ -59,7 +59,8 @@ RUN pip install --no-cache-dir --no-build-isolation \
     fastapi \
     onnxruntime \
     inflect \
-    uvicorn
+    uvicorn \
+    ipykernel
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 
