@@ -43,8 +43,8 @@ ENV CUDA_ROOT=/usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
-RUN pip install --no-cache-dir --no-build-isolation \
-    tokenizers 
+#RUN pip install --no-cache-dir --no-build-isolation \
+#    tokenizers 
     # grouped_gemm==0.1.4 \
     # peft==0.17.1 \
     # diffusers==0.33.0 \
