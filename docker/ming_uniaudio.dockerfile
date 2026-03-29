@@ -25,7 +25,7 @@ RUN ln -s /usr/bin/python3.11 /usr/bin/python && \
     ln -s /usr/bin/pip3.11 /usr/bin/pip
 
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip config set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
 
 RUN pip install --no-cache-dir \
     torch==2.8.0 \
@@ -60,8 +60,7 @@ RUN pip install --no-cache-dir --no-build-isolation \
     fastapi \
     onnxruntime \
     inflect \
-    uvicorn \
-    ipykernel
+    uvicorn
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 
