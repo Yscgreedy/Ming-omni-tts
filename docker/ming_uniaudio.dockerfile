@@ -44,7 +44,7 @@ ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 RUN pip install --no-cache-dir --no-build-isolation \
-    tokenizers \
+    tokenizers 
     # grouped_gemm==0.1.4 \
     # peft==0.17.1 \
     # diffusers==0.33.0 \
@@ -59,7 +59,7 @@ RUN pip install --no-cache-dir --no-build-isolation \
     # accelerate==1.3.0 \
     # fastapi \
     # onnxruntime \
-    #inflect \
+    # inflect \
     # uvicorn
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
