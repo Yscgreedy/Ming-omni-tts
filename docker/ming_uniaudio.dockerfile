@@ -16,6 +16,7 @@ RUN apt-get update && \
         libsndfile1 \
         build-essential \
         python3-dev \
+        openssh-server \
         && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
