@@ -46,21 +46,21 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 RUN pip install --no-cache-dir --no-build-isolation \
     tokenizers \
     # grouped_gemm==0.1.4 \
-    peft==0.17.1 \
-    diffusers==0.33.0 \
-    decord==0.6.0 \
-    hyperpyyaml==1.2.2 \
-    soundfile==0.12.1 \
-    transformers==4.52.4 \
-    x_transformers \
-    torchdiffeq \
-    torchtune \
-    torchao==0.13.0 \
-    accelerate==1.3.0 \
-    fastapi \
-    onnxruntime \
-    inflect \
-    uvicorn
+    # peft==0.17.1 \
+    # diffusers==0.33.0 \
+    # decord==0.6.0 \
+    # hyperpyyaml==1.2.2 \
+    # soundfile==0.12.1 \
+    # transformers==4.52.4 \
+    # x_transformers \
+    # torchdiffeq \
+    # torchtune \
+    # torchao==0.13.0 \
+    # accelerate==1.3.0 \
+    # fastapi \
+    # onnxruntime \
+    #inflect \
+    # uvicorn
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 
