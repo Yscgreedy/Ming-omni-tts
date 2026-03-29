@@ -20,7 +20,7 @@ RUN apt-get update && \
         && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
+# python环境配置
 RUN ln -s /usr/bin/python3.11 /usr/bin/python && \
     ln -s /usr/bin/pip3.11 /usr/bin/pip
 
@@ -34,15 +34,15 @@ RUN pip install --no-cache-dir \
 
 
 ENV FORCE_CUDA="1"
-# A100: 8.0, RTX 30xx: 8.6, RTX 40xx/H100: 8.9 or 9.0
-ENV TORCH_CUDA_ARCH_LIST="8.0"
+# A100: 8.0, RTX 30xx: 8.6, RTX 40xx/H100/L40: 8.9 or 9.0
+ENV TORCH_CUDA_ARCH_LIST="8.9" 
 ENV GROUPED_GEMM_CUTLASS="1"
 
 ENV CUDA_HOME=/usr/local/cuda
 ENV CUDA_ROOT=/usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-
+# 下载依赖，即使成功运行，仓库内的env.sh也需要执行一次，因为还需要安装模型，如果环境创建失败，可以先注释掉下面的命令，进入容器后手动执行安装命令。
 RUN pip install --no-cache-dir --no-build-isolation \
     tokenizers  \
     # grouped_gemm==0.1.4 \
@@ -61,7 +61,7 @@ RUN pip install --no-cache-dir --no-build-isolation \
      onnxruntime \
      inflect \
      uvicorn
-
+# 安装flash attention，注意版本需要和torch、cuda版本匹配，否则会安装失败。如果安装失败，可以先注释掉下面的命令，进入容器后手动执行
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 
 ARG FLASH_ATTN_URL=https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/${FLASH_ATTN_WHEEL}
@@ -70,6 +70,7 @@ RUN wget -q ${FLASH_ATTN_URL} -O /tmp/${FLASH_ATTN_WHEEL} && \
     rm /tmp/${FLASH_ATTN_WHEEL}
 
 WORKDIR /app
+# 允许执行下面的命令，如果仍显示permission denied，可以进入容器后手动执行chmod命令
 RUN chmod +x service.sh
 RUN chmod +x env.sh
 RUN chmod +x watch.sh
