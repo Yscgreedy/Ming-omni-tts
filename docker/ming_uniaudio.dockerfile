@@ -24,7 +24,7 @@ RUN ln -s /usr/bin/python3.11 /usr/bin/python && \
     ln -s /usr/bin/pip3.11 /usr/bin/pip
 
 RUN pip install --no-cache-dir --upgrade pip
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+RUN pip config set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/
 
 RUN pip install --no-cache-dir \
     torch==2.8.0 \
