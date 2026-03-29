@@ -55,6 +55,12 @@ model_lock = asyncio.Lock()
 model_instance: Optional[MingAudio] = None
 
 
+@app.on_event("startup")
+async def preload_model_on_startup() -> None:
+    async with model_lock:
+        get_model()
+
+
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
