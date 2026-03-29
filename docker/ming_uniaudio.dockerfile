@@ -16,6 +16,7 @@ RUN apt-get update && \
         libsndfile1 \
         build-essential \
         python3-dev \
+        openssh-server \
         && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -50,16 +51,16 @@ RUN pip install --no-cache-dir --no-build-isolation \
      decord==0.6.0 \
      hyperpyyaml==1.2.2 \
      soundfile==0.12.1 \
-    # transformers==4.52.4 \
-    # x_transformers \
-    # torchdiffeq \
-    # torchtune \
-    # torchao==0.13.0 \
-    # accelerate==1.3.0 \
-    # fastapi \
-    # onnxruntime \
-    # inflect \
-    # uvicorn
+     transformers==4.52.4 \
+     x_transformers \
+     torchdiffeq \
+     torchtune \
+     torchao==0.13.0 \
+     accelerate==1.3.0 \
+     fastapi \
+     onnxruntime \
+     inflect \
+     uvicorn
 
 ARG FLASH_ATTN_WHEEL=flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 
@@ -69,5 +70,8 @@ RUN wget -q ${FLASH_ATTN_URL} -O /tmp/${FLASH_ATTN_WHEEL} && \
     rm /tmp/${FLASH_ATTN_WHEEL}
 
 WORKDIR /app
-
+RUN chmod +x service.sh
+RUN chmod +x env.sh
+RUN chmod +x watch.sh
+RUN ./watch.sh
 CMD ["/bin/bash"]
