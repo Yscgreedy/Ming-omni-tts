@@ -74,4 +74,5 @@ RUN chmod +x service.sh
 RUN chmod +x env.sh
 RUN chmod +x watch.sh
 RUN ./watch.sh
+
 CMD ["/bin/bash"]
