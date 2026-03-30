@@ -58,6 +58,8 @@ def model_already_cached(repo_id: str, cache_dir: str) -> bool:
 
 
 def main() -> int:
+    if os.path.exists("/Models"):
+        return 0
     try:
         snapshot_download = importlib.import_module("huggingface_hub").snapshot_download
     except ImportError as exc:
