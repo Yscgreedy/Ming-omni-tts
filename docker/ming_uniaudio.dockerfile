@@ -71,9 +71,9 @@ RUN wget -q ${FLASH_ATTN_URL} -O /tmp/${FLASH_ATTN_WHEEL} && \
 
 WORKDIR /app
 # 允许执行下面的命令，如果仍显示permission denied，可以进入容器后手动执行chmod命令
-RUN chmod +x service.sh
-RUN chmod +x env.sh
-RUN chmod +x watch.sh
-RUN ./watch.sh
+#RUN chmod +x service.sh
+#RUN chmod +x env.sh
+#RUN chmod +x watch.sh
+#RUN ./watch.sh
 
 CMD ["/bin/bash"]
