@@ -18,6 +18,7 @@ from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from modeling_bailingmm import BailingMMNativeForConditionalGeneration
+from prompt_audio_cache import resolve_prompt_audio_path
 from sentence_manager.sentence_manager import SentenceNormalizer
 from spkemb_extractor import SpkembExtractor
 
@@ -154,7 +155,8 @@ class MingAudio:
         if waveform_path is None:
             return None, None
 
-        waveform, sr = torchaudio.load(waveform_path)
+        resolved_waveform_path = resolve_prompt_audio_path(waveform_path) if isinstance(waveform_path, str) else waveform_path
+        waveform, sr = torchaudio.load(resolved_waveform_path)
         waveform1 = waveform.clone()
         if sr != self.sample_rate:
             waveform = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)(waveform)

@@ -1225,3 +1225,16 @@ curl -X POST http://127.0.0.1:8000/v1/generate \
     "prompt_wav_path": "data/wavs/00000309-00000300.wav"
   }'
 ```
+## 当前协作版本
+
+`0.1.1`
+
+当前仓库已补充对 `prompt_wav_path` URL 输入的支持，可直接从 HTTP/HTTPS 地址下载克隆参考音频，再交给推理流程读取。
+当前实现会把远程参考音频按“完整下载 URL 哈希”暂存到共享缓存目录，默认 `30min` 内命中则直接复用，适配同机多进程推理服务。
+
+### 参考音频 URL 缓存
+- 缓存目录默认位于 `Ming-omni-tts/runtime-cache/prompt-audio/`
+- 可通过环境变量 `PROMPT_AUDIO_CACHE_DIR` 覆盖缓存目录
+- 缓存 TTL 默认 `1800` 秒，可通过 `PROMPT_AUDIO_CACHE_TTL_SECONDS` 覆盖
+- 同一完整 URL 会命中同一个缓存文件；URL 中版本参数变化会自动落到新的缓存文件
+- 下载采用临时文件加原子替换，避免多进程读到半文件
