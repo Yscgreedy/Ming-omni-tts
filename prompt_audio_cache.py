@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CACHE_TTL_SECONDS = 1800
@@ -83,6 +87,7 @@ class _FileLock:
         self._acquired = False
 
     def __enter__(self) -> "_FileLock":
+        wait_started_at = time.perf_counter()
         deadline = time.time() + self.timeout_seconds
         while True:
             try:
@@ -99,6 +104,7 @@ class _FileLock:
             with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
                 lock_file.write(str(os.getpid()))
             self._acquired = True
+            self.wait_ms = round((time.perf_counter() - wait_started_at) * 1000, 2)
             return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -106,7 +112,7 @@ class _FileLock:
             self.lock_path.unlink(missing_ok=True)
 
 
-def resolve_prompt_audio_path(path_or_url: str) -> str:
+def resolve_prompt_audio_path(path_or_url: str, *, diagnostics: dict[str, object] | None = None) -> str:
     if not is_remote_prompt_audio(path_or_url):
         return path_or_url
 
@@ -118,16 +124,44 @@ def resolve_prompt_audio_path(path_or_url: str) -> str:
     cache_path = _build_cache_file_path(cache_dir, path_or_url)
     if _is_cache_file_fresh(cache_path, ttl_seconds):
         _touch(cache_path)
+        if diagnostics is not None:
+            diagnostics.update(
+                {
+                    "remote": True,
+                    "cacheHit": True,
+                    "downloadMs": 0.0,
+                    "lockWaitMs": 0.0,
+                    "bytes": cache_path.stat().st_size,
+                }
+            )
+        logger.info("Prompt audio cache hit: bytes=%s url=%s", cache_path.stat().st_size, path_or_url)
         return str(cache_path)
 
     lock_path = cache_path.with_suffix(f"{cache_path.suffix}.lock")
-    with _FileLock(lock_path):
+    with _FileLock(lock_path) as lock:
         if _is_cache_file_fresh(cache_path, ttl_seconds):
             _touch(cache_path)
+            if diagnostics is not None:
+                diagnostics.update(
+                    {
+                        "remote": True,
+                        "cacheHit": True,
+                        "downloadMs": 0.0,
+                        "lockWaitMs": getattr(lock, "wait_ms", 0.0),
+                        "bytes": cache_path.stat().st_size,
+                    }
+                )
+            logger.info(
+                "Prompt audio cache hit after lock: lock_wait_ms=%s bytes=%s url=%s",
+                getattr(lock, "wait_ms", 0.0),
+                cache_path.stat().st_size,
+                path_or_url,
+            )
             return str(cache_path)
 
         temp_path = cache_path.with_suffix(f"{cache_path.suffix}.part.{os.getpid()}")
         try:
+            download_started_at = time.perf_counter()
             response = requests.get(path_or_url, timeout=30)
             response.raise_for_status()
             temp_path.write_bytes(response.content)
@@ -135,8 +169,27 @@ def resolve_prompt_audio_path(path_or_url: str) -> str:
                 raise PromptAudioCacheError(f"Downloaded prompt audio is empty: {path_or_url}")
             temp_path.replace(cache_path)
             _touch(cache_path)
+            download_ms = round((time.perf_counter() - download_started_at) * 1000, 2)
+            if diagnostics is not None:
+                diagnostics.update(
+                    {
+                        "remote": True,
+                        "cacheHit": False,
+                        "downloadMs": download_ms,
+                        "lockWaitMs": getattr(lock, "wait_ms", 0.0),
+                        "bytes": cache_path.stat().st_size,
+                    }
+                )
+            logger.info(
+                "Prompt audio downloaded: lock_wait_ms=%s download_ms=%s bytes=%s url=%s",
+                getattr(lock, "wait_ms", 0.0),
+                download_ms,
+                cache_path.stat().st_size,
+                path_or_url,
+            )
             return str(cache_path)
         except requests.RequestException as exc:
+            logger.warning("Prompt audio download failed: url=%s error=%s", path_or_url, exc)
             raise PromptAudioCacheError(f"Failed to download prompt audio: {exc}") from exc
         finally:
             temp_path.unlink(missing_ok=True)

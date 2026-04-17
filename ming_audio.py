@@ -151,11 +151,20 @@ class MingAudio:
             waveform = new_wav
         return waveform
 
-    def preprocess_one_prompt_wav(self, waveform_path: Optional[str], use_spk_emb: bool):
+    def preprocess_one_prompt_wav(
+        self,
+        waveform_path: Optional[str],
+        use_spk_emb: bool,
+        *,
+        prompt_audio_diagnostics: list[dict[str, object]] | None = None,
+    ):
         if waveform_path is None:
             return None, None
 
-        resolved_waveform_path = resolve_prompt_audio_path(waveform_path) if isinstance(waveform_path, str) else waveform_path
+        prompt_audio_diag: dict[str, object] = {}
+        resolved_waveform_path = (
+            resolve_prompt_audio_path(waveform_path, diagnostics=prompt_audio_diag) if isinstance(waveform_path, str) else waveform_path
+        )
         waveform, sr = torchaudio.load(resolved_waveform_path)
         waveform1 = waveform.clone()
         if sr != self.sample_rate:
@@ -166,6 +175,10 @@ class MingAudio:
             spk_emb = self.spkemb_extractor(waveform1)
         else:
             spk_emb = None
+        if prompt_audio_diagnostics is not None and prompt_audio_diag:
+            prompt_audio_diag["sourcePath"] = waveform_path
+            prompt_audio_diag["resolvedPath"] = resolved_waveform_path
+            prompt_audio_diagnostics.append(prompt_audio_diag)
         return waveform, spk_emb
 
     def _prepare_speech_inputs(
@@ -176,13 +189,17 @@ class MingAudio:
         prompt_wav_path: Optional[Union[str, list]],
         prompt_text: Optional[str],
     ):
+        prompt_audio_diagnostics: list[dict[str, object]] = []
         if prompt_wav_path is None:
             prompt_waveform, prompt_text, spk_emb = None, None, None
             if use_zero_spk_emb:
                 spk_emb = [torch.zeros(1, 192, device=self.device, dtype=torch.bfloat16)]
         else:
             paths = prompt_wav_path if isinstance(prompt_wav_path, list) else [prompt_wav_path]
-            processed_prompts = [self.preprocess_one_prompt_wav(path, use_spk_emb) for path in paths]
+            processed_prompts = [
+                self.preprocess_one_prompt_wav(path, use_spk_emb, prompt_audio_diagnostics=prompt_audio_diagnostics)
+                for path in paths
+            ]
             waveforms_list, spk_emb = zip(*processed_prompts)
             prompt_waveform = torch.cat(waveforms_list, dim=-1)
             prompt_waveform = self.pad_waveform(prompt_waveform)
@@ -195,7 +212,22 @@ class MingAudio:
             instruction_obj = self.create_instruction(instruction)
             instruction_payload = json.dumps(instruction_obj, ensure_ascii=False)
 
-        return prompt_waveform, prompt_text, spk_emb, instruction_payload
+        prompt_audio_summary = {
+            "promptAudioCount": len(prompt_audio_diagnostics),
+            "remotePromptAudioCount": len([item for item in prompt_audio_diagnostics if item.get("remote") is True]),
+            "promptAudioCacheHitCount": len([item for item in prompt_audio_diagnostics if item.get("cacheHit") is True]),
+            "promptAudioDownloadMs": round(
+                sum(float(item.get("downloadMs") or 0.0) for item in prompt_audio_diagnostics),
+                2,
+            ),
+            "promptAudioLockWaitMs": round(
+                sum(float(item.get("lockWaitMs") or 0.0) for item in prompt_audio_diagnostics),
+                2,
+            ),
+            "promptAudioDiagnostics": prompt_audio_diagnostics,
+        }
+
+        return prompt_waveform, prompt_text, spk_emb, instruction_payload, prompt_audio_summary
 
     @torch.inference_mode()
     def speech_generation(
@@ -212,14 +244,16 @@ class MingAudio:
         sigma: float = 0.25,
         temperature: float = 0.0,
         output_wav_path: Optional[str] = None,
+        diagnostics: Optional[dict[str, Any]] = None,
     ):
-        prompt_waveform, prompt_text, spk_emb, instruction_payload = self._prepare_speech_inputs(
+        prompt_waveform, prompt_text, spk_emb, instruction_payload, prompt_audio_summary = self._prepare_speech_inputs(
             use_spk_emb=use_spk_emb,
             use_zero_spk_emb=use_zero_spk_emb,
             instruction=instruction,
             prompt_wav_path=prompt_wav_path,
             prompt_text=prompt_text,
         )
+        generation_diagnostics: dict[str, Any] = {}
 
         model: Any = self.model
         waveform = model.generate(
@@ -234,6 +268,7 @@ class MingAudio:
             sigma=sigma,
             temperature=temperature,
             use_zero_spk_emb=use_zero_spk_emb,
+            diagnostics=generation_diagnostics,
         )
 
         if output_wav_path is not None:
@@ -241,6 +276,9 @@ class MingAudio:
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             torchaudio.save(output_wav_path, waveform, sample_rate=self.sample_rate)
+        if diagnostics is not None:
+            diagnostics.update(prompt_audio_summary)
+            diagnostics.update(generation_diagnostics)
         return waveform
 
     @torch.inference_mode()
@@ -257,14 +295,16 @@ class MingAudio:
         cfg: float = 2.0,
         sigma: float = 0.25,
         temperature: float = 0.0,
+        diagnostics: Optional[dict[str, Any]] = None,
     ) -> Generator[bytes, None, None]:
-        prompt_waveform, prompt_text, spk_emb, instruction_payload = self._prepare_speech_inputs(
+        prompt_waveform, prompt_text, spk_emb, instruction_payload, prompt_audio_summary = self._prepare_speech_inputs(
             use_spk_emb=use_spk_emb,
             use_zero_spk_emb=use_zero_spk_emb,
             instruction=instruction,
             prompt_wav_path=prompt_wav_path,
             prompt_text=prompt_text,
         )
+        generation_diagnostics: dict[str, Any] = {}
 
         model: Any = self.model
         stream_state = (None, None, None)
@@ -285,6 +325,7 @@ class MingAudio:
                 sigma=sigma,
                 temperature=temperature,
                 use_zero_spk_emb=use_zero_spk_emb,
+                diagnostics=generation_diagnostics,
             ):
                 speech_chunk, stream_state, past_key_values = model.audio.decode(
                     sampled_tokens,
@@ -300,6 +341,9 @@ class MingAudio:
                     continue
                 chunk_pcm = pcm_tensor.numpy().tobytes()
                 if chunk_pcm:
+                    if diagnostics is not None and not diagnostics:
+                        diagnostics.update(prompt_audio_summary)
+                        diagnostics.update(generation_diagnostics)
                     yield chunk_pcm
 
     def generation(

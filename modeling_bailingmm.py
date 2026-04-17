@@ -392,7 +392,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         cfg=2.0,
         sigma=0.25,
         temperature=0,
-        use_zero_spk_emb=False
+        use_zero_spk_emb=False,
+        diagnostics=None,
     ):
         # Prepare inputs
         if prompt_waveform is not None and prompt_text is not None:
@@ -466,6 +467,9 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
 
                 # Check if the generation is complete.
                 if self.stop_head(z_diff)[0][0].softmax(dim=-1)[1] > 0.5 and step > 3:
+                    if isinstance(diagnostics, dict):
+                        diagnostics["decodeSteps"] = step + 1
+                        diagnostics["stepLimitReached"] = False
                     yield sampled_token_latent, True
                     break
                 else:
@@ -492,6 +496,10 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
                 attention_mask = _step_attn_mask
                 latent_history = torch.roll(latent_history, -self.patch_size, dims=1)
                 latent_history[:, -self.patch_size:, :] = sampled_token_latent
+        else:
+            if isinstance(diagnostics, dict):
+                diagnostics["decodeSteps"] = max_decode_steps
+                diagnostics["stepLimitReached"] = True
 
     @torch.inference_mode()
     def generate(
@@ -506,7 +514,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         cfg=2.0,
         sigma=0.25,
         temperature=0,
-        use_zero_spk_emb=False
+        use_zero_spk_emb=False,
+        diagnostics=None,
     ):
         stream_state = (None, None, None)
         past_key_values = None
@@ -525,7 +534,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
                     cfg=cfg,
                     sigma=sigma,
                     temperature=temperature,
-                    use_zero_spk_emb=use_zero_spk_emb
+                    use_zero_spk_emb=use_zero_spk_emb,
+                    diagnostics=diagnostics,
             ):
                 speech_tmp, stream_state, past_key_values = self.audio.decode(sampled_tokens, past_key_values=past_key_values, use_cache=use_cache, stream_state=stream_state, last_chunk=last_chunk)
                 speech.append(speech_tmp)

@@ -4,7 +4,7 @@ main:
         build: docker/ming_uniaudio.dockerfile
       runner:
         cpus: 8
-        tags: cnb:arch:amd64:gpu:h20
+        tags: cnb:arch:amd64:gpu
       services:
         - vscode
         - docker

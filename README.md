@@ -1172,6 +1172,10 @@ pip install -r requirements.txt
 uvicorn service.app:app --host 0.0.0.0 --port 8000
 # or
 python ./service/app.py
+# or manage multi-process instances
+./service.sh start
+./service.sh status
+./service.sh stop
 ```
 
 Unified endpoint:
@@ -1227,10 +1231,11 @@ curl -X POST http://127.0.0.1:8000/v1/generate \
 ```
 ## 当前协作版本
 
-`0.1.1`
+`0.1.2`
 
 当前仓库已补充对 `prompt_wav_path` URL 输入的支持，可直接从 HTTP/HTTPS 地址下载克隆参考音频，再交给推理流程读取。
 当前实现会把远程参考音频按“完整下载 URL 哈希”暂存到共享缓存目录，默认 `30min` 内命中则直接复用，适配同机多进程推理服务。
+当前服务同时补充了多进程诊断日志，会按进程输出 `pid/port/request_id`、锁等待、提示音频下载、模型生成、响应写出、音频字节数、`decode steps` 与 `step limit` 命中情况，方便和上游编排服务联调。
 
 ### 参考音频 URL 缓存
 - 缓存目录默认位于 `Ming-omni-tts/runtime-cache/prompt-audio/`
@@ -1238,3 +1243,8 @@ curl -X POST http://127.0.0.1:8000/v1/generate \
 - 缓存 TTL 默认 `1800` 秒，可通过 `PROMPT_AUDIO_CACHE_TTL_SECONDS` 覆盖
 - 同一完整 URL 会命中同一个缓存文件；URL 中版本参数变化会自动落到新的缓存文件
 - 下载采用临时文件加原子替换，避免多进程读到半文件
+
+### 推理诊断响应头
+- `/v1/generate` 会返回 `X-Request-Id`、`X-Ming-Pid`、`X-Ming-Port`
+- 同时返回 `X-Lock-Wait-Ms`、`X-Lock-Held-Ms`、`X-Prompt-Audio-Download-Ms`、`X-Model-Generate-Ms`、`X-Response-Write-Ms`
+- 长句诊断字段包括 `X-Text-Len`、`X-Max-Decode-Steps`、`X-Decode-Steps`、`X-Step-Limit-Reached`

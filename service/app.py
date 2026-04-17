@@ -1,6 +1,8 @@
 import asyncio
 import io
+import logging
 import os
+import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Union
 import sys
@@ -9,11 +11,14 @@ import torch
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ming_audio import MingAudio, seed_everything
+
+
+logger = logging.getLogger(__name__)
 
 
 class GenerateRequest(BaseModel):
@@ -53,6 +58,55 @@ class StreamRequest(BaseModel):
 app = FastAPI(title="Ming Omni TTS Service", version="1.0.0")
 model_lock = asyncio.Lock()
 model_instance: Optional[MingAudio] = None
+SERVICE_PORT = os.getenv("PORT", "8000")
+
+
+def _round_ms(value: float | None) -> str:
+    if value is None:
+        return "0"
+    return str(round(float(value), 2))
+
+
+def _build_trace_headers(*, trace_id: str, diagnostics: dict[str, Any], audio_bytes: int = 0) -> dict[str, str]:
+    return {
+        "X-Request-Id": trace_id,
+        "X-Ming-Pid": str(os.getpid()),
+        "X-Ming-Port": SERVICE_PORT,
+        "X-Lock-Wait-Ms": _round_ms(diagnostics.get("lockWaitMs")),
+        "X-Lock-Held-Ms": _round_ms(diagnostics.get("lockHeldMs")),
+        "X-Prompt-Audio-Download-Ms": _round_ms(diagnostics.get("promptAudioDownloadMs")),
+        "X-Response-Write-Ms": _round_ms(diagnostics.get("responseWriteMs")),
+        "X-Model-Generate-Ms": _round_ms(diagnostics.get("modelGenerateMs")),
+        "X-Audio-Bytes": str(audio_bytes),
+        "X-Text-Len": str(diagnostics.get("textLen", 0)),
+        "X-Max-Decode-Steps": str(diagnostics.get("maxDecodeSteps", 0)),
+        "X-Decode-Steps": str(diagnostics.get("decodeSteps", 0)),
+        "X-Step-Limit-Reached": str(bool(diagnostics.get("stepLimitReached", False))).lower(),
+    }
+
+
+def _log_request(stage: str, *, trace_id: str, diagnostics: dict[str, Any], **fields: object) -> None:
+    logger.info(
+        "Ming service trace %s",
+        {
+            "stage": stage,
+            "traceId": trace_id,
+            "pid": os.getpid(),
+            "port": SERVICE_PORT,
+            "textLen": diagnostics.get("textLen"),
+            "maxDecodeSteps": diagnostics.get("maxDecodeSteps"),
+            "lockWaitMs": diagnostics.get("lockWaitMs"),
+            "lockHeldMs": diagnostics.get("lockHeldMs"),
+            "promptAudioDownloadMs": diagnostics.get("promptAudioDownloadMs"),
+            "promptAudioLockWaitMs": diagnostics.get("promptAudioLockWaitMs"),
+            "modelGenerateMs": diagnostics.get("modelGenerateMs"),
+            "responseWriteMs": diagnostics.get("responseWriteMs"),
+            "audioBytes": diagnostics.get("audioBytes"),
+            "decodeSteps": diagnostics.get("decodeSteps"),
+            "stepLimitReached": diagnostics.get("stepLimitReached"),
+            **fields,
+        },
+    )
 
 
 @app.on_event("startup")
@@ -117,17 +171,29 @@ async def _iter_pcm_chunks(generator) -> AsyncIterator[bytes]:
 
 
 @app.post("/v1/generate")
-async def generate(request: GenerateRequest):
+async def generate(http_request: Request, request: GenerateRequest):
     model = get_model()
+    trace_id = http_request.headers.get("X-HearOpus-Trace-Id", "").strip() or f"trace_{uuid.uuid4().hex[:12]}"
+    diagnostics: dict[str, Any] = {
+        "textLen": len(request.text.strip()),
+        "maxDecodeSteps": request.max_decode_steps,
+    }
+    request_started_at = time.perf_counter()
+    lock_wait_started_at = request_started_at
 
     try:
         async with model_lock:
+            diagnostics["lockWaitMs"] = round((time.perf_counter() - lock_wait_started_at) * 1000, 2)
+            lock_held_started_at = time.perf_counter()
+            _log_request("lock_acquired", trace_id=trace_id, diagnostics=diagnostics, taskType=request.task_type, responseMode=request.response_mode)
             if request.task_type == "text":
                 content = model.generation(
                     prompt=request.prompt,
                     text=request.text,
                     max_decode_steps=request.max_decode_steps,
                 )
+                diagnostics["lockHeldMs"] = round((time.perf_counter() - lock_held_started_at) * 1000, 2)
+                _log_request("text_complete", trace_id=trace_id, diagnostics=diagnostics)
                 return JSONResponse({"task_type": "text", "text": content})
 
             if request.response_mode == "path":
@@ -135,6 +201,7 @@ async def generate(request: GenerateRequest):
                 if not output_wav_path:
                     output_wav_path = os.path.join("output", "service", f"{uuid.uuid4().hex}.wav")
 
+                model_started_at = time.perf_counter()
                 waveform = model.speech_generation(
                     prompt=request.prompt,
                     text=request.text,
@@ -148,8 +215,12 @@ async def generate(request: GenerateRequest):
                     sigma=request.sigma,
                     temperature=request.temperature,
                     output_wav_path=output_wav_path,
+                    diagnostics=diagnostics,
                 )
+                diagnostics["modelGenerateMs"] = round((time.perf_counter() - model_started_at) * 1000, 2)
+                diagnostics["lockHeldMs"] = round((time.perf_counter() - lock_held_started_at) * 1000, 2)
                 duration = float(waveform.shape[-1]) / float(model.sample_rate)
+                _log_request("path_complete", trace_id=trace_id, diagnostics=diagnostics, outputPath=output_wav_path, durationSeconds=duration)
                 return JSONResponse(
                     {
                         "task_type": "speech",
@@ -160,6 +231,7 @@ async def generate(request: GenerateRequest):
                     }
                 )
 
+            model_started_at = time.perf_counter()
             waveform = model.speech_generation(
                 prompt=request.prompt,
                 text=request.text,
@@ -173,27 +245,48 @@ async def generate(request: GenerateRequest):
                 sigma=request.sigma,
                 temperature=request.temperature,
                 output_wav_path=None,
+                diagnostics=diagnostics,
             )
-            buffer = io.BytesIO(_waveform_to_wav_bytes(waveform, model.sample_rate))
+            diagnostics["modelGenerateMs"] = round((time.perf_counter() - model_started_at) * 1000, 2)
+            write_started_at = time.perf_counter()
+            wav_bytes = _waveform_to_wav_bytes(waveform, model.sample_rate)
+            diagnostics["responseWriteMs"] = round((time.perf_counter() - write_started_at) * 1000, 2)
+            diagnostics["audioBytes"] = len(wav_bytes)
+            diagnostics["lockHeldMs"] = round((time.perf_counter() - lock_held_started_at) * 1000, 2)
+            buffer = io.BytesIO(wav_bytes)
             buffer.seek(0)
+            _log_request("generate_complete", trace_id=trace_id, diagnostics=diagnostics, totalRequestMs=round((time.perf_counter() - request_started_at) * 1000, 2))
 
             return StreamingResponse(
                 buffer,
                 media_type="audio/wav",
-                headers={"Content-Disposition": "inline; filename=generated.wav"},
+                headers={
+                    "Content-Disposition": "inline; filename=generated.wav",
+                    **_build_trace_headers(trace_id=trace_id, diagnostics=diagnostics, audio_bytes=len(wav_bytes)),
+                },
             )
 
     except Exception as exc:
+        diagnostics["lockHeldMs"] = round((time.perf_counter() - request_started_at) * 1000, 2)
+        _log_request("generate_failed", trace_id=trace_id, diagnostics=diagnostics, error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/v1/stream")
-async def stream_generate(request: StreamRequest):
+async def stream_generate(http_request: Request, request: StreamRequest):
     model = get_model()
+    trace_id = http_request.headers.get("X-HearOpus-Trace-Id", "").strip() or f"trace_{uuid.uuid4().hex[:12]}"
+    diagnostics: dict[str, Any] = {
+        "textLen": len(request.text.strip()),
+        "maxDecodeSteps": request.max_decode_steps,
+    }
 
     try:
         async def _streamer() -> AsyncIterator[bytes]:
+            lock_wait_started_at = time.perf_counter()
             async with model_lock:
+                diagnostics["lockWaitMs"] = round((time.perf_counter() - lock_wait_started_at) * 1000, 2)
+                lock_held_started_at = time.perf_counter()
                 generator = model.speech_generation_stream(
                     prompt=request.prompt,
                     text=request.text,
@@ -206,9 +299,18 @@ async def stream_generate(request: StreamRequest):
                     cfg=request.cfg,
                     sigma=request.sigma,
                     temperature=request.temperature,
+                    diagnostics=diagnostics,
                 )
+                chunk_count = 0
+                total_bytes = 0
                 async for chunk in _iter_pcm_chunks(generator):
+                    chunk_count += 1
+                    total_bytes += len(chunk)
                     yield chunk
+                diagnostics["audioBytes"] = total_bytes
+                diagnostics["chunkCount"] = chunk_count
+                diagnostics["lockHeldMs"] = round((time.perf_counter() - lock_held_started_at) * 1000, 2)
+                _log_request("stream_complete", trace_id=trace_id, diagnostics=diagnostics)
 
         return StreamingResponse(
             _streamer(),
@@ -218,10 +320,12 @@ async def stream_generate(request: StreamRequest):
                 "X-Audio-Sample-Rate": str(model.sample_rate),
                 "X-Audio-Channels": "1",
                 "Content-Disposition": "inline; filename=stream_generated.pcm",
+                **_build_trace_headers(trace_id=trace_id, diagnostics=diagnostics, audio_bytes=0),
             },
         )
 
     except Exception as exc:
+        _log_request("stream_failed", trace_id=trace_id, diagnostics=diagnostics, error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
